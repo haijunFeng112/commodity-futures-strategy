@@ -1,215 +1,214 @@
 """
 数据管理模块
-负责加载、清洗和管理期货交易数据
+提供数据的加载、验证和处理功能
 """
 
 import pandas as pd
 import numpy as np
+from typing import Dict, Optional, List
 import os
-from datetime import datetime
-from typing import Optional, Dict, Any
 
 
 class DataManager:
-    """数据管理类"""
+    """数据管理器"""
     
     def __init__(self, data_path: str = 'data/'):
         """
         初始化数据管理器
         
         Args:
-            data_path: 数据存储路径
+            data_path: 数据文件路径
         """
         self.data_path = data_path
-        self.data = None
         
-    def load_csv(self, file_path: str, date_column: str = 'date', 
-                 parse_dates: bool = True) -> pd.DataFrame:
+        # 创建数据目录
+        os.makedirs(data_path, exist_ok=True)
+    
+    def load_csv(self, filepath: str) -> pd.DataFrame:
         """
-        从CSV文件加载期货数据
+        加载CSV文件
         
         Args:
-            file_path: CSV文件路径
-            date_column: 日期列名称
-            parse_dates: 是否解析日期
+            filepath: CSV文件路径
             
         Returns:
-            期货数据DataFrame
+            加载的DataFrame
         """
         try:
-            if parse_dates:
-                df = pd.read_csv(file_path, parse_dates=[date_column])
-                df = df.sort_values(by=date_column)
-            else:
-                df = pd.read_csv(file_path)
+            df = pd.read_csv(filepath)
             
-            self.data = df
-            print(f"成功加载数据: {file_path}")
-            print(f"数据范围: {df[date_column].min()} 到 {df[date_column].max()}")
-            print(f"数据行数: {len(df)}")
+            # 转换日期列
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+            
+            print(f"成功加载数据: {filepath}")
+            print(f"数据形状: {df.shape}")
             
             return df
         except FileNotFoundError:
-            print(f"错误: 文件 {file_path} 不存在")
+            print(f"错误: 文件不存在 {filepath}")
             return None
         except Exception as e:
-            print(f"加载数据时出错: {e}")
+            print(f"错误: 加载文件失败 {e}")
             return None
     
-    def load_from_dict(self, data_dict: Dict[str, Any]) -> pd.DataFrame:
+    def save_csv(self, data: pd.DataFrame, filepath: str) -> bool:
         """
-        从字典加载数据
+        保存数据为CSV
         
         Args:
-            data_dict: 包含期货数据的字典
-            
-        Returns:
-            期货数据DataFrame
-        """
-        df = pd.DataFrame(data_dict)
-        self.data = df
-        return df
-    
-    def save_csv(self, data: pd.DataFrame, file_path: str) -> bool:
-        """
-        将数据保存为CSV文件
-        
-        Args:
-            data: 待保存的DataFrame
-            file_path: 保存路径
+            data: 要保存的DataFrame
+            filepath: 保存路径
             
         Returns:
             是否保存成功
         """
         try:
-            data.to_csv(file_path, index=False)
-            print(f"数据已保存到: {file_path}")
+            data.to_csv(filepath, index=False)
+            print(f"成功保存数据: {filepath}")
             return True
         except Exception as e:
-            print(f"保存数据时出错: {e}")
+            print(f"错误: 保存文件失败 {e}")
             return False
     
-    def validate_data(self, df: pd.DataFrame = None) -> bool:
+    def validate_data(self, data: pd.DataFrame) -> bool:
         """
-        验证数据完整性
+        验证数据
         
         Args:
-            df: 待验证的DataFrame，如果为None则验证self.data
+            data: 要验证的DataFrame
             
         Returns:
             数据是否有效
         """
-        if df is None:
-            df = self.data
-        
-        if df is None:
-            print("错误: 没有加载数据")
-            return False
+        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
         
         # 检查必要列
-        required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            print(f"错误: 缺少必要列: {missing_columns}")
+        missing_cols = [col for col in required_columns if col not in data.columns]
+        if missing_cols:
+            print(f"错误: 缺少必要列 {missing_cols}")
             return False
         
-        # 检查是否有NaN值
-        if df.isnull().any().any():
-            print("警告: 数据中存在NaN值")
-            print(df.isnull().sum())
+        # 检查数据数量
+        if len(data) == 0:
+            print("错误: 数据为空")
             return False
         
-        print("数据验证通过")
+        # 检查数据类型
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in numeric_cols:
+            if not pd.api.types.is_numeric_dtype(data[col]):
+                print(f"错误: 列 {col} 应为数值类型")
+                return False
+        
+        # 检查high >= low
+        if (data['high'] < data['low']).any():
+            print("警告: 存在high < low的数据")
+        
+        print("数据验证成功")
         return True
     
-    def clean_data(self, df: pd.DataFrame = None) -> pd.DataFrame:
+    def clean_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        清洗数据（移除NaN、异常值等）
+        清洗数据
         
         Args:
-            df: 待清洗的DataFrame
+            data: 要清洗的DataFrame
             
         Returns:
             清洗后的DataFrame
         """
-        if df is None:
-            df = self.data.copy()
-        else:
-            df = df.copy()
+        df = data.copy()
         
         # 移除NaN
+        initial_len = len(df)
         df = df.dropna()
+        removed = initial_len - len(df)
+        if removed > 0:
+            print(f"清除了{removed}行含有NaN的数据")
         
-        # 移除明显的异常值（例如成交量为0）
-        df = df[df['volume'] > 0]
+        # 移除重覆数据
+        df = df.drop_duplicates(subset=['date'], keep='first')
         
-        # 确保价格合理（high >= low, close在high和low之间）
-        df = df[(df['high'] >= df['low']) & 
-                (df['close'] >= df['low']) & 
-                (df['close'] <= df['high'])]
+        # 按日期排序
+        df = df.sort_values('date').reset_index(drop=True)
         
-        self.data = df
-        print(f"数据清洗完成，剩余 {len(df)} 条记录")
+        # 修复high/low不一致
+        df['high'] = df[['open', 'close', 'high']].max(axis=1)
+        df['low'] = df[['open', 'close', 'low']].min(axis=1)
         
+        print(f"数据清洗成功: {len(df)}条记录")
         return df
     
-    def resample_data(self, df: pd.DataFrame = None, freq: str = 'D') -> pd.DataFrame:
+    def get_data_summary(self, data: pd.DataFrame) -> Dict:
         """
-        重新采样数据（改变时间频率）
+        获取数据简介
         
         Args:
-            df: 待重新采样的DataFrame
-            freq: 频率 ('D'=日, 'W'=周, 'M'=月)
+            data: DataFrame
             
         Returns:
-            重新采样后的DataFrame
+            数据简介字典
         """
-        if df is None:
-            df = self.data.copy()
-        else:
-            df = df.copy()
+        return {
+            'rows': len(data),
+            'columns': len(data.columns),
+            'date_range': f"{data['date'].min()} to {data['date'].max()}",
+            'price_range': f"{data['close'].min():.2f} - {data['close'].max():.2f}",
+            'avg_volume': data['volume'].mean(),
+            'missing_values': data.isnull().sum().sum()
+        }
+    
+    def resample_data(self, data: pd.DataFrame, freq: str = 'D') -> pd.DataFrame:
+        """
+        重新采样数据
         
-        # 设置日期索引
+        Args:
+            data: 原始数据
+            freq: 采样频率 ('D': 日, 'W': 周, 'M': 月)
+            
+        Returns:
+            重新采样后的数据
+        """
+        df = data.copy()
         df.set_index('date', inplace=True)
         
-        # 重新采样
-        ohlcv = df[['open', 'high', 'low', 'close']].resample(freq).ohlc()
-        ohlcv['volume'] = df['volume'].resample(freq).sum()
-        
-        ohlcv.reset_index(inplace=True)
-        ohlcv.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
-        
-        self.data = ohlcv
-        print(f"数据已重新采样为 {freq} 频率，共 {len(ohlcv)} 条记录")
-        
-        return ohlcv
+        try:
+            # 重新采样OHLCV
+            ohlc_dict = {
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            }
+            
+            resampled = df.resample(freq).agg(ohlc_dict)
+            resampled = resampled.dropna()
+            resampled.reset_index(inplace=True)
+            
+            print(f"重新采样成功: {len(resampled)}条记录")
+            return resampled
+        except Exception as e:
+            print(f"错误: 重新采样失败 {e}")
+            return None
     
-    def get_data(self) -> pd.DataFrame:
-        """获取当前数据"""
-        return self.data
-    
-    def get_data_slice(self, start_date: str = None, 
-                       end_date: str = None) -> pd.DataFrame:
+    def split_train_test(self, data: pd.DataFrame, 
+                        test_ratio: float = 0.2) -> tuple:
         """
-        获取指定日期范围的数据切片
+        分割训练集和测试集
         
         Args:
-            start_date: 开始日期
-            end_date: 结束日期
+            data: 整个数据集
+            test_ratio: 测试集比例
             
         Returns:
-            切片后的DataFrame
+            (训练集, 测试集)
         """
-        if self.data is None:
-            return None
+        split_idx = int(len(data) * (1 - test_ratio))
         
-        df = self.data.copy()
+        train_data = data[:split_idx].reset_index(drop=True)
+        test_data = data[split_idx:].reset_index(drop=True)
         
-        if start_date:
-            df = df[df['date'] >= start_date]
-        
-        if end_date:
-            df = df[df['date'] <= end_date]
-        
-        return df
+        print(f"数据分割: 训练集{len(train_data)}, 测试集{len(test_data)}")
+        return train_data, test_data
